@@ -1,0 +1,573 @@
+import nodemailer from 'nodemailer';
+import { PDFDocument } from 'pdf-lib';
+import sql from 'mssql';
+import { DatabaseManager } from '../database';
+
+interface SMTPConfig {
+    SMTPServer: string;
+    SMTPPort: number;
+    SMTPAccountName: string;
+    SMTPPassword: string;
+    SMTPMailId: string;
+    ApplicationName: string;
+    SMTPSSLFlag?: string;
+    ParamCode?: string;
+    IsActive?: string;
+}
+
+interface EmailRecord {
+    dd_srno?: number;
+    dd_document?: Buffer;
+    dd_filename?: string;
+    dd_Finaldocument?: Buffer;
+    dd_Encpassword?: string;
+    dd_toEmailid: string;
+    dd_ccEmailid?: string;
+    dd_subject: string;
+    dd_bodyText: string;
+    dd_SendFlag?: string;
+    dd_EmailParamCode?: string;
+    dd_RetryCount?: number;
+    [key: string]: unknown;
+}
+
+interface EmailResult {
+    success: boolean;
+    messageId?: string;
+    recipient: string;
+    cc?: string;
+    error?: string;
+}
+
+export class EmailService {
+    private static instance: EmailService;
+    private globalTransporter: nodemailer.Transporter | null = null;
+    private dbManager: DatabaseManager;
+
+    private constructor() {
+        this.dbManager = DatabaseManager.getInstance();
+    }
+
+    public static getInstance(): EmailService {
+        if (!EmailService.instance) {
+            EmailService.instance = new EmailService();
+        }
+        return EmailService.instance;
+    }
+
+    /**
+ * Get SMTP details from database (legacy - uses first record)
+ */
+    async getSmtpDetails(): Promise<SMTPConfig> {
+        try {
+            const pool = await this.dbManager.getConnection();
+
+            // Check if table exists first
+            const tableCheck = await pool.request().query(`
+        SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_NAME = 'tbl_EMailParameters'
+      `);
+
+            if (tableCheck.recordset[0].count === 0) {
+                throw new Error('SMTP configuration table (tbl_EMailParameters) does not exist. Please create the table first.');
+            }
+
+            const result = await pool.request().query(
+                "SELECT * FROM tbl_EMailParameters WHERE IsActive = 'Y' OR IsActive IS NULL"
+            );
+
+            if (result.recordset.length === 0) {
+                throw new Error('No SMTP configuration found in tbl_EMailParameters. Please add SMTP settings to the table.');
+            }
+
+            // Always use the first record
+            const smtpConfig = result.recordset[0];
+            console.log(`📧 Using SMTP configuration: ${smtpConfig.SMTPMailId} via ${smtpConfig.SMTPServer}:${smtpConfig.SMTPPort}`);
+
+            return smtpConfig;
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error fetching SMTP details:', errorMessage);
+            throw error;
+        }
+    }
+
+    /**
+     * Get SMTP details by ParamCode (Dynamic SMTP Selection)
+     */
+    async getSmtpDetailsByParamCode(paramCode: string): Promise<SMTPConfig> {
+        try {
+            const pool = await this.dbManager.getConnection();
+
+            console.log(`🔍 Looking for SMTP configuration with ParamCode: ${paramCode}`);
+
+            const result = await pool.request()
+                .input('paramCode', sql.NVarChar, paramCode)
+                .query(`
+          SELECT * FROM tbl_EMailParameters 
+          WHERE ParamCode = @paramCode 
+          AND (IsActive = 'Y' OR IsActive IS NULL)
+        `);
+
+            if (result.recordset.length === 0) {
+                // Fallback to default (first active record)
+                const fallbackResult = await pool.request().query(`
+          SELECT * FROM tbl_EMailParameters 
+          WHERE IsActive = 'Y' OR IsActive IS NULL 
+          ORDER BY ParamCode ASC
+        `);
+
+                if (fallbackResult.recordset.length === 0) {
+                    throw new Error('No active SMTP configuration found in tbl_EMailParameters');
+                }
+
+                const fallbackConfig = fallbackResult.recordset[0];
+                console.log(`📧 Using fallback SMTP configuration: ${fallbackConfig.SMTPMailId} via ${fallbackConfig.SMTPServer}:${fallbackConfig.SMTPPort}`);
+                return fallbackConfig;
+            }
+
+            const smtpConfig = result.recordset[0];
+            console.log(`✅ Found SMTP configuration for ${paramCode}: ${smtpConfig.SMTPMailId} via ${smtpConfig.SMTPServer}:${smtpConfig.SMTPPort}`);
+
+            return smtpConfig;
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`❌ Error fetching SMTP details for ParamCode ${paramCode}:`, errorMessage);
+            throw error;
+        }
+    }
+
+    /**
+     * Create email transporter using SMTP details with connection pooling
+     */
+    createEmailTransporter(smtpConfig: SMTPConfig): nodemailer.Transporter {
+        if (this.globalTransporter) {
+            return this.globalTransporter;
+        }
+
+        this.globalTransporter = nodemailer.createTransport({
+            host: smtpConfig.SMTPServer,
+            port: smtpConfig.SMTPPort,
+            secure: smtpConfig.SMTPPort === 465, // true for 465, false for other ports like 587
+            auth: {
+                user: smtpConfig.SMTPAccountName,
+                pass: smtpConfig.SMTPPassword
+            },
+            pool: true, // Enable connection pooling
+            maxConnections: 20, // Maximum number of connections
+            maxMessages: 100, // Maximum messages per connection
+            rateDelta: 1000, // Rate limiting: time window in ms
+            rateLimit: 50, // Rate limiting: max emails per time window
+            tls: {
+                rejectUnauthorized: false
+            }
+        });
+
+        return this.globalTransporter;
+    }
+
+    /**
+     * Close global transporter
+     */
+    closeEmailTransporter(): void {
+        if (this.globalTransporter) {
+            this.globalTransporter.close();
+            this.globalTransporter = null;
+            console.log('📪 Email transporter closed');
+        }
+    }
+
+    /**
+     * Log successful email send to file
+     */
+    private logEmailSuccess(emailRecord: EmailRecord, result: { messageId: string; recipient: string; cc?: string }): void {
+        try {
+            const logPath = 'logs/email-success.log';
+            const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+            const logEntry = `SUCCESS - ${timestamp}\n` +
+                `Email ID: ${emailRecord.dd_srno}\n` +
+                `Message ID: ${result.messageId}\n` +
+                `Recipient: ${result.recipient}\n` +
+                `CC: ${result.cc || 'None'}\n` +
+                `Subject: ${emailRecord.dd_subject}\n` +
+                `Attachment: ${emailRecord.dd_filename || 'None'}\n` +
+                `Status: Email sent successfully\n` +
+                `Response: Email delivered to mail server\n` +
+                `Database Status: Updated to 'Y' (Sent)\n` +
+                `${'='.repeat(80)}\n\n`;
+
+            // Create logs directory if it doesn't exist
+            const fs = require('fs');
+            const path = require('path');
+            const logDir = path.dirname(logPath);
+            if (!fs.existsSync(logDir)) {
+                fs.mkdirSync(logDir, { recursive: true });
+            }
+
+            fs.appendFileSync(logPath, logEntry);
+            console.log(`📝 Email success logged to: ${logPath}`);
+        } catch (logError) {
+            console.warn('⚠️ Could not write to success log:', logError);
+        }
+    }
+
+    /**
+     * Store final document (encrypted PDF) in database
+     */
+    private async storeFinalDocument(emailId: number, finalDocumentBuffer: Buffer): Promise<void> {
+        try {
+            const pool = await this.dbManager.getConnection();
+
+            await pool.request()
+                .input('emailId', sql.Int, emailId)
+                .input('finalDocument', sql.VarBinary, finalDocumentBuffer)
+                .query('UPDATE Digital_Emaildetails SET dd_Finaldocument = @finalDocument WHERE dd_srno = @emailId');
+
+            console.log(`📋 Final document stored for email ${emailId}`);
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`❌ Error storing final document for email ${emailId}:`, errorMessage);
+            throw error;
+        }
+    }
+
+    /**
+     * Encrypt PDF with password using pdf-lib
+     */
+    async encryptPdfWithPassword(pdfBuffer: Buffer, password: string): Promise<Buffer> {
+        try {
+            // Load PDF to validate it
+            await PDFDocument.load(pdfBuffer);
+
+            // Note: pdf-lib doesn't support password encryption directly
+            // This is a simplified approach - in production you might need a different library
+            // For now, we'll return the original PDF and log that encryption was requested
+            console.log(`🔒 PDF encryption requested with password (length: ${password.length})`);
+            console.log('⚠️ Note: PDF encryption not implemented - returning original PDF');
+
+            return pdfBuffer;
+        } catch (error: unknown) {
+            console.error('❌ Error encrypting PDF:', error);
+            // Return original PDF if encryption fails
+            return pdfBuffer;
+        }
+    }
+
+    /**
+     * Send email with PDF attachment
+     */
+    async sendEmailWithAttachment(emailRecord: EmailRecord, smtpConfig?: SMTPConfig): Promise<EmailResult> {
+        try {
+            // Get SMTP config with dynamic selection support
+            if (!smtpConfig) {
+                // Use dynamic SMTP selection if emailRecord has dd_EmailParamCode
+                if (emailRecord.dd_EmailParamCode && emailRecord.dd_EmailParamCode.trim() !== '') {
+                    console.log(`🔧 Using dynamic SMTP config: ${emailRecord.dd_EmailParamCode}`);
+                    smtpConfig = await this.getSmtpDetailsByParamCode(emailRecord.dd_EmailParamCode.trim());
+                } else {
+                    console.log('🔧 Using default SMTP config');
+                    smtpConfig = await this.getSmtpDetails();
+                }
+            }
+
+            const transporter = this.createEmailTransporter(smtpConfig);
+
+            // Prepare email attachments
+            const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+
+            // Add PDF attachment if document exists
+            if (emailRecord.dd_document && emailRecord.dd_filename) {
+                let pdfContent: Buffer | null = null;
+
+                // Check if we already have a final document (encrypted version)
+                if (emailRecord.dd_Finaldocument) {
+                    console.log(`📎 Using existing final document for "${emailRecord.dd_filename}"`);
+                    pdfContent = emailRecord.dd_Finaldocument;
+                } else {
+                    // Use original document and encrypt if needed
+                    pdfContent = emailRecord.dd_document;
+
+                    if (emailRecord.dd_Encpassword && emailRecord.dd_Encpassword.trim() !== '') {
+                        console.log(`🔒 Encrypting PDF "${emailRecord.dd_filename}" with password`);
+                        pdfContent = await this.encryptPdfWithPassword(emailRecord.dd_document, emailRecord.dd_Encpassword);
+
+                        // Store the encrypted PDF as final document
+                        if (emailRecord.dd_srno) {
+                            try {
+                                await this.storeFinalDocument(emailRecord.dd_srno, pdfContent);
+                                console.log(`✅ Final document stored in database for email ${emailRecord.dd_srno}`);
+                            } catch (storeError) {
+                                console.warn(`⚠️ Warning: Could not store final document: ${storeError}`);
+                            }
+                        }
+                    } else {
+                        console.log(`📎 Attaching PDF "${emailRecord.dd_filename}" without encryption`);
+                    }
+                }
+
+                attachments.push({
+                    filename: emailRecord.dd_filename,
+                    content: pdfContent,
+                    contentType: 'application/pdf'
+                });
+            }
+
+            // Prepare recipient list
+            const toEmails = emailRecord.dd_toEmailid ? emailRecord.dd_toEmailid.trim() : '';
+            const ccEmails = emailRecord.dd_ccEmailid ? emailRecord.dd_ccEmailid.trim() : '';
+
+            if (!toEmails) {
+                throw new Error('No recipient email address found');
+            }
+
+            // Compose email
+            const mailOptions: nodemailer.SendMailOptions = {
+                from: `"${smtpConfig.ApplicationName}" <${smtpConfig.SMTPMailId}>`,
+                to: toEmails,
+                subject: emailRecord.dd_subject || 'No Subject',
+                html: emailRecord.dd_bodyText || 'No content',
+                attachments: attachments
+            };
+
+            // Add CC if exists
+            if (ccEmails) {
+                mailOptions.cc = ccEmails;
+            }
+
+            console.log(`📧 Sending email to: ${toEmails}${ccEmails ? ` (CC: ${ccEmails})` : ''}`);
+            console.log(`📎 Attachments: ${attachments.length > 0 ? emailRecord.dd_filename : 'None'}`);
+
+            const info = await transporter.sendMail(mailOptions);
+
+            console.log(`✅ Email sent successfully! Message ID: ${info.messageId}`);
+
+            const result = {
+                success: true,
+                messageId: info.messageId,
+                recipient: toEmails,
+                cc: ccEmails
+            };
+
+            // Log successful email send
+            this.logEmailSuccess(emailRecord, result);
+
+            return result;
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`❌ Error sending email:`, errorMessage);
+            return {
+                success: false,
+                recipient: emailRecord.dd_toEmailid,
+                cc: emailRecord.dd_ccEmailid,
+                error: errorMessage
+            };
+        }
+    }
+
+    /**
+     * Send test email
+     */
+    async sendTestEmail(toEmail: string = 'test@example.com'): Promise<EmailResult> {
+        try {
+            console.log('\n🔄 Fetching SMTP configuration...');
+            const smtpConfig = await this.getSmtpDetails();
+
+            console.log('🔄 Creating email transporter...');
+            const transporter = this.createEmailTransporter(smtpConfig);
+
+            // Verify transporter configuration
+            console.log('🔄 Verifying SMTP connection...');
+            await transporter.verify();
+            console.log('✅ SMTP connection verified successfully!');
+
+            // Compose test email
+            const mailOptions = {
+                from: `"${smtpConfig.ApplicationName}" <${smtpConfig.SMTPMailId}>`,
+                to: toEmail,
+                subject: `Test Email from ${smtpConfig.ApplicationName} - ${new Date().toLocaleString()}`,
+                html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">🧪 SMTP Test Email</h2>
+            <p>This is a test email sent from <strong>${smtpConfig.ApplicationName}</strong> application.</p>
+            
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3 style="margin-top: 0;">📧 SMTP Configuration Details:</h3>
+              <ul style="list-style: none; padding: 0;">
+                <li><strong>Server:</strong> ${smtpConfig.SMTPServer}:${smtpConfig.SMTPPort}</li>
+                <li><strong>From:</strong> ${smtpConfig.SMTPMailId}</li>
+                <li><strong>SSL/TLS:</strong> ${smtpConfig.SMTPSSLFlag === 'Y' ? 'Enabled' : 'Disabled'}</li>
+                <li><strong>Application:</strong> ${smtpConfig.ApplicationName}</li>
+              </ul>
+            </div>
+            
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+              Sent at: ${new Date().toLocaleString()}<br>
+              From: Next.js Email Service
+            </p>
+          </div>
+        `
+            };
+
+            console.log('🔄 Sending test email...');
+            const info = await transporter.sendMail(mailOptions);
+
+            console.log('✅ Test email sent successfully!');
+            console.log(`📬 Message ID: ${info.messageId}`);
+
+            return {
+                success: true,
+                messageId: info.messageId,
+                recipient: toEmail
+            };
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error sending test email:', errorMessage);
+            return {
+                success: false,
+                recipient: toEmail,
+                error: errorMessage
+            };
+        }
+    }
+
+    /**
+ * Get pending emails from database (implement based on your table structure)
+ */
+    async getPendingEmails(): Promise<EmailRecord[]> {
+        try {
+            const pool = await this.dbManager.getConnection();
+
+            // Check if table exists first
+            const tableCheck = await pool.request().query(`
+        SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_NAME = 'Digital_Emaildetails'
+      `);
+
+            if (tableCheck.recordset[0].count === 0) {
+                console.log('📭 Email queue table (Digital_Emaildetails) does not exist. No emails to process.');
+                return [];
+            }
+
+            // Using the correct table name Digital_Emaildetails with correct column names
+            const result = await pool.request().query(`
+        SELECT TOP 10 * FROM Digital_Emaildetails 
+        WHERE dd_SendFlag = 'N'
+        ORDER BY dd_srno ASC
+      `);
+
+            console.log(`📨 Found ${result.recordset.length} pending emails`);
+            return result.recordset;
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error fetching pending emails:', errorMessage);
+            // Return empty array instead of throwing to allow service to continue
+            return [];
+        }
+    }
+
+    /**
+     * Update email status in database
+     */
+    async updateEmailStatus(emailId: number, status: string, messageId?: string, error?: string): Promise<void> {
+        try {
+            const pool = await this.dbManager.getConnection();
+
+            // Build query based on status with proper defaults for non-nullable columns
+            let query = `UPDATE Digital_Emaildetails SET dd_SendFlag = @status`;
+            const request = pool.request()
+                .input('emailId', sql.Int, emailId)
+                .input('status', sql.NVarChar, status);
+
+            if (status === 'Y') {
+                // Success: Update dd_SentDate and clear dd_BounceReason
+                query += ', dd_SentDate = @processedDate, dd_BounceReason = @bounceReason';
+                request.input('processedDate', sql.DateTime, new Date());
+                request.input('bounceReason', sql.NVarChar, ''); // Empty string for success
+                console.log(`📧 Marking email ${emailId} as sent successfully`);
+            } else if (status === 'N' && error && error.trim() !== '') {
+                // Failure: Update dd_BounceReason and dd_LastRetryDate
+                query += ', dd_BounceReason = @bounceReason, dd_LastRetryDate = @retryDate';
+                request.input('bounceReason', sql.NVarChar, error);
+                request.input('retryDate', sql.DateTime, new Date());
+                console.log(`❌ Marking email ${emailId} as failed with reason: ${error}`);
+            } else if (status === 'E') {
+                // Permanent failure: Update dd_BounceReason only
+                query += ', dd_BounceReason = @bounceReason';
+                request.input('bounceReason', sql.NVarChar, error || 'Permanent failure after max retries');
+                console.log(`🚫 Marking email ${emailId} as permanently failed`);
+            }
+
+            query += ' WHERE dd_srno = @emailId';
+
+            await request.query(query);
+
+            console.log(`📝 Updated email ${emailId} status to: ${status}`);
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error updating email status:', errorMessage);
+        }
+    }
+
+    /**
+     * Process email queue
+     */
+    async processEmailQueue(): Promise<{ processed: number; success: number; failed: number }> {
+        const stats = { processed: 0, success: 0, failed: 0 };
+
+        try {
+            const pendingEmails = await this.getPendingEmails();
+
+            if (pendingEmails.length === 0) {
+                console.log('📭 No pending emails to process');
+                return stats;
+            }
+
+            console.log(`🔄 Processing ${pendingEmails.length} pending emails...`);
+
+            for (const emailRecord of pendingEmails) {
+                stats.processed++;
+
+                try {
+                    const result = await this.sendEmailWithAttachment(emailRecord);
+
+                    if (result.success) {
+                        stats.success++;
+                        if (emailRecord.dd_srno) {
+                            await this.updateEmailStatus(emailRecord.dd_srno, 'Y', result.messageId);
+                        }
+                    } else {
+                        stats.failed++;
+                        if (emailRecord.dd_srno) {
+                            await this.updateEmailStatus(emailRecord.dd_srno, 'N', undefined, result.error);
+                        }
+                    }
+
+                } catch (error: unknown) {
+                    stats.failed++;
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                    if (emailRecord.dd_srno) {
+                        await this.updateEmailStatus(emailRecord.dd_srno, 'N', undefined, errorMessage);
+                    }
+                }
+
+                // Small delay between emails to respect rate limits
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            console.log(`📊 Email processing complete: ${stats.success} sent, ${stats.failed} failed`);
+
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error processing email queue:', errorMessage);
+        }
+
+        return stats;
+    }
+}

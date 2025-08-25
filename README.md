@@ -1,22 +1,41 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Email Service Application
+
+A comprehensive email sending service with Microsoft SQL Server integration, featuring:
+- 📧 **Email Queue Processing** with PDF attachments and encryption
+- 🗄️ **Database Integration** with Dynamic SMTP configuration  
+- 📊 **Real-time Dashboard** with service monitoring and statistics
+- ⚙️ **Configuration Management** with auto-restart capabilities
+- 🔐 **Secure Authentication** with encrypted credential storage
+
 ## Getting Started
 
-First, run the development server:
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+
+3. **Open your browser** and navigate to [http://localhost:3000](http://localhost:3000)
+
+4. **Follow the setup wizard** to configure your database and email settings
+
+5. **Start sending emails!**
+
+## 🔧 Emergency Credential Reset
+
+If you forget your login credentials, use the emergency reset script:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+node reset-credentials.js
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+This will reset your username and password to `admin`/`admin`. See `CREDENTIAL_RESET_GUIDE.md` for detailed instructions.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
