@@ -248,10 +248,9 @@ export class EmailService {
             console.log(`🔒 Starting PDF processing (sign + encrypt)...`);
             console.log(`🔍 DEBUG: Input PDF size: ${pdfBuffer.length}`);
 
-            // Check if signing is available
+            // Check if signing is available (but we can still encrypt without signing)
             if (!this.pdfSigningService.isSigningAvailable()) {
-                console.log('⚠️ PDF signing not available, returning original PDF');
-                return pdfBuffer;
+                console.log('⚠️ PDF signing not available, but will still process for encryption if needed');
             }
 
             // Extract signing and encryption information from email record

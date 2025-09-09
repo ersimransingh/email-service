@@ -22,14 +22,15 @@ interface CertificateInfo {
 
 export class PdfSigningService {
     private static instance: PdfSigningService;
-    private dummyCertificate: {
+    private realCertificate: {
         cert: forge.pki.Certificate;
         privateKey: forge.pki.PrivateKey;
         publicKey: forge.pki.PublicKey;
     } | null = null;
 
     private constructor() {
-        this.initializeDummyCertificate();
+        // Don't initialize any certificates by default
+        // Real certificates should be loaded when available
     }
 
     public static getInstance(): PdfSigningService {
@@ -40,53 +41,23 @@ export class PdfSigningService {
     }
 
     /**
-     * Initialize a dummy certificate for testing purposes
+     * Load real certificate from file system
+     * This method should be called when real certificates are available
      */
-    private initializeDummyCertificate(): void {
+    async loadRealCertificate(certPath: string, keyPath: string, password?: string): Promise<boolean> {
         try {
-            // Create a self-signed certificate for testing
-            const keys = forge.pki.rsa.generateKeyPair(2048);
-            const cert = forge.pki.createCertificate();
+            // TODO: Implement real certificate loading
+            // This would load actual certificates from the file system
+            console.log('📋 Real certificate loading not implemented yet');
+            console.log('📋 Certificate path:', certPath);
+            console.log('📋 Key path:', keyPath);
+            console.log('📋 Password provided:', !!password);
 
-            cert.publicKey = keys.publicKey;
-            cert.serialNumber = '01';
-            cert.validity.notBefore = new Date();
-            cert.validity.notAfter = new Date();
-            cert.validity.notAfter.setFullYear(cert.validity.notAfter.getFullYear() + 1);
-
-            const attrs = [{
-                name: 'commonName',
-                value: 'Test Certificate'
-            }, {
-                name: 'countryName',
-                value: 'IN'
-            }, {
-                shortName: 'ST',
-                value: 'Test State'
-            }, {
-                name: 'localityName',
-                value: 'Test City'
-            }, {
-                name: 'organizationName',
-                value: 'Test Organization'
-            }, {
-                shortName: 'OU',
-                value: 'Test Unit'
-            }];
-
-            cert.setSubject(attrs);
-            cert.setIssuer(attrs);
-            cert.sign(keys.privateKey);
-
-            this.dummyCertificate = {
-                cert: cert,
-                privateKey: keys.privateKey,
-                publicKey: keys.publicKey
-            };
-
-            console.log('✅ Dummy certificate initialized for testing');
+            // For now, return false to indicate no real certificate is available
+            return false;
         } catch (error) {
-            console.error('❌ Error initializing dummy certificate:', error);
+            console.error('❌ Error loading real certificate:', error);
+            return false;
         }
     }
 
@@ -96,48 +67,24 @@ export class PdfSigningService {
     async signPdf(pdfBuffer: Buffer, config: SigningConfig): Promise<Buffer> {
         try {
             console.log(`🔒 Starting PDF signing process...`);
-            console.log(`📝 Signing details:`, {
-                signedBy: config.signedBy,
-                signedOn: config.signedOn,
-                signedTm: config.signedTm
-            });
 
-            // Load the PDF document
-            const pdfDoc = await PDFDocument.load(pdfBuffer);
-
-            // Get the last page to add signature
-            const pages = pdfDoc.getPages();
-            const lastPage = pages[pages.length - 1];
-
-            // Create signature text
-            const signatureText = `
-Digitally Signed
-By: ${config.signedBy}
-Date: ${config.signedOn}
-Time: ${config.signedTm}
-Certificate: Test Certificate
-            `.trim();
-
-            // Add visible signature to the PDF
-            await this.addSignatureAppearance(pdfDoc, lastPage, signatureText, 50, 50, 200, 100);
-
-            // If PDF password is provided, encrypt the PDF
-            if (config.pdfPassword && config.pdfPassword.trim() !== '') {
-                console.log(`🔐 Encrypting PDF with password...`);
-                // Note: pdf-lib doesn't support password encryption directly
-                // This is a placeholder for future implementation
-                console.log('⚠️ PDF encryption not fully implemented in pdf-lib');
+            if (!this.realCertificate) {
+                console.log('⚠️ No real certificate available - skipping PDF signing');
+                console.log('⚠️ PDF will be processed without digital signature');
+                return pdfBuffer; // Return original PDF without signing
             }
 
-            // Save the signed PDF
-            const signedPdfBytes = await pdfDoc.save();
-            console.log(`✅ PDF signed successfully`);
+            // TODO: Implement real digital signature with actual certificate
+            console.log('📋 Real digital signature not implemented yet');
+            console.log('📋 Would sign with certificate:', this.realCertificate.cert.subject);
 
-            return Buffer.from(signedPdfBytes);
+            // For now, return the original PDF without signing
+            return pdfBuffer;
 
         } catch (error) {
             console.error('❌ Error signing PDF:', error);
-            throw error;
+            // Return original PDF if signing fails
+            return pdfBuffer;
         }
     }
 
@@ -191,65 +138,39 @@ Certificate: Test Certificate
     }
 
     /**
-     * Create a digital signature using the dummy certificate
+     * Create a digital signature using real certificate
      */
     private createDigitalSignature(data: string): string {
         try {
-            if (!this.dummyCertificate) {
-                throw new Error('Certificate not initialized');
+            if (!this.realCertificate) {
+                throw new Error('No real certificate available');
             }
 
-            // Create a simple hash-based signature for testing
-            const md = forge.md.sha256.create();
-            md.update(data);
-            const hash = md.digest().toHex();
-
-            // In a real implementation, this would be a proper digital signature
-            // For now, we'll create a simple hash-based signature
-            const signature = `SIGNATURE_${hash.substring(0, 16)}_${Date.now()}`;
-
-            return signature;
+            // TODO: Implement real digital signature creation
+            console.log('📋 Real digital signature creation not implemented yet');
+            return 'placeholder-signature';
         } catch (error) {
             console.error('❌ Error creating digital signature:', error);
-            return 'SIGNATURE_ERROR';
+            throw error;
         }
     }
 
-    /**
-     * Validate certificate (placeholder for real certificate validation)
-     */
-    private validateCertificate(certPath?: string): boolean {
-        try {
-            if (certPath && fs.existsSync(certPath)) {
-                // In a real implementation, this would validate the actual certificate
-                console.log(`📜 Certificate found at: ${certPath}`);
-                return true;
-            }
-
-            // Use dummy certificate for testing
-            console.log('📜 Using dummy certificate for testing');
-            return this.dummyCertificate !== null;
-        } catch (error) {
-            console.error('❌ Error validating certificate:', error);
-            return false;
-        }
-    }
 
     /**
-     * Get certificate information
+     * Get certificate information (only for real certificates)
      */
     getCertificateInfo(): CertificateInfo {
-        if (this.dummyCertificate) {
+        if (this.realCertificate) {
             return {
-                commonName: 'Test Certificate',
-                organization: 'Test Organization',
-                validFrom: new Date(),
-                validTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
-                serialNumber: '01'
+                commonName: this.realCertificate.cert.subject.getField('CN')?.value || 'Unknown',
+                organization: this.realCertificate.cert.subject.getField('O')?.value || 'Unknown',
+                validFrom: this.realCertificate.cert.validity.notBefore,
+                validTo: this.realCertificate.cert.validity.notAfter,
+                serialNumber: this.realCertificate.cert.serialNumber
             };
         }
 
-        throw new Error('No certificate available');
+        throw new Error('No real certificate available');
     }
 
     /**
@@ -348,10 +269,10 @@ Certificate: Test Certificate
     }
 
     /**
-     * Check if signing is available
+     * Check if signing is available (only with real certificates)
      */
     isSigningAvailable(): boolean {
-        return this.dummyCertificate !== null;
+        return this.realCertificate !== null;
     }
 }
 
