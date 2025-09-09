@@ -246,6 +246,7 @@ export class EmailService {
     async processPdfWithSigningAndEncryption(pdfBuffer: Buffer, emailRecord: EmailRecord): Promise<Buffer> {
         try {
             console.log(`🔒 Starting PDF processing (sign + encrypt)...`);
+            console.log(`🔍 DEBUG: Input PDF size: ${pdfBuffer.length}`);
 
             // Check if signing is available
             if (!this.pdfSigningService.isSigningAvailable()) {
@@ -262,11 +263,15 @@ export class EmailService {
             };
 
             console.log(`📝 Processing PDF with:`, processingConfig);
+            console.log(`🔍 DEBUG: Password for encryption: "${processingConfig.pdfPassword}"`);
+            console.log(`🔍 DEBUG: Password length: ${processingConfig.pdfPassword.length}`);
 
             // Process the PDF (sign + encrypt)
             const processedPdfBuffer = await this.pdfSigningService.processPdfWithSigningAndEncryption(pdfBuffer, processingConfig);
 
             console.log(`✅ PDF processed successfully (signed + encrypted)`);
+            console.log(`🔍 DEBUG: Output PDF size: ${processedPdfBuffer.length}`);
+            console.log(`🔍 DEBUG: Size changed: ${processedPdfBuffer.length !== pdfBuffer.length}`);
             return processedPdfBuffer;
 
         } catch (error: unknown) {
@@ -304,34 +309,46 @@ export class EmailService {
             if (emailRecord.dd_document && emailRecord.dd_filename) {
                 let pdfContent: Buffer | null = null;
 
-                // Check if we already have a final document (signed/encrypted version)
-                if (emailRecord.dd_Finaldocument) {
-                    console.log(`📎 Using existing final document for "${emailRecord.dd_filename}"`);
+                // Check if PDF needs processing (signing or encryption)
+                const needsSigning = emailRecord.dd_signedby || emailRecord.dd_signedon || emailRecord.dd_signedtm;
+                const needsEncryption = emailRecord.dd_Encpassword && emailRecord.dd_Encpassword.trim() !== '';
+
+                console.log(`🔍 DEBUG: PDF Processing Check:`);
+                console.log(`🔍 DEBUG: - dd_Encpassword: "${emailRecord.dd_Encpassword}"`);
+                console.log(`🔍 DEBUG: - needsEncryption: ${needsEncryption}`);
+                console.log(`🔍 DEBUG: - needsSigning: ${needsSigning}`);
+                console.log(`🔍 DEBUG: - Has dd_Finaldocument: ${!!emailRecord.dd_Finaldocument}`);
+
+                // Always process if encryption is needed, even if dd_Finaldocument exists
+                if (needsEncryption) {
+                    console.log(`🔐 Password encryption required - processing PDF even if dd_Finaldocument exists`);
+                    pdfContent = emailRecord.dd_document; // Use original document for encryption
+                } else if (emailRecord.dd_Finaldocument && !needsEncryption) {
+                    console.log(`📎 Using existing final document for "${emailRecord.dd_filename}" (no encryption needed)`);
                     pdfContent = emailRecord.dd_Finaldocument;
                 } else {
                     // Start with original document
                     pdfContent = emailRecord.dd_document;
+                }
 
-                    // Check if PDF needs processing (signing or encryption)
-                    const needsSigning = emailRecord.dd_signedby || emailRecord.dd_signedon || emailRecord.dd_signedtm;
-                    const needsEncryption = emailRecord.dd_Encpassword && emailRecord.dd_Encpassword.trim() !== '';
+                console.log(`🔍 DEBUG: - PDF size before processing: ${pdfContent.length}`);
 
-                    if (needsSigning || needsEncryption) {
-                        console.log(`🔒 Processing PDF "${emailRecord.dd_filename}" (signing: ${needsSigning}, encryption: ${needsEncryption})`);
-                        pdfContent = await this.processPdfWithSigningAndEncryption(pdfContent, emailRecord);
+                if (needsSigning || needsEncryption) {
+                    console.log(`🔒 Processing PDF "${emailRecord.dd_filename}" (signing: ${needsSigning}, encryption: ${needsEncryption})`);
+                    pdfContent = await this.processPdfWithSigningAndEncryption(pdfContent, emailRecord);
+                    console.log(`🔍 DEBUG: - PDF size after processing: ${pdfContent.length}`);
 
-                        // Store the final processed document (signed and/or encrypted)
-                        if (emailRecord.dd_srno) {
-                            try {
-                                await this.storeFinalDocument(emailRecord.dd_srno, pdfContent);
-                                console.log(`✅ Final document stored in database for email ${emailRecord.dd_srno}`);
-                            } catch (storeError) {
-                                console.warn(`⚠️ Warning: Could not store final document: ${storeError}`);
-                            }
+                    // Store the final processed document (signed and/or encrypted)
+                    if (emailRecord.dd_srno) {
+                        try {
+                            await this.storeFinalDocument(emailRecord.dd_srno, pdfContent);
+                            console.log(`✅ Final document stored in database for email ${emailRecord.dd_srno}`);
+                        } catch (storeError) {
+                            console.warn(`⚠️ Warning: Could not store final document: ${storeError}`);
                         }
-                    } else {
-                        console.log(`📎 Attaching PDF "${emailRecord.dd_filename}" without signing or encryption`);
                     }
+                } else {
+                    console.log(`📎 Attaching PDF "${emailRecord.dd_filename}" without signing or encryption`);
                 }
 
                 attachments.push({

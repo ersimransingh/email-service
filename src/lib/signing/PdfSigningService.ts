@@ -311,6 +311,8 @@ Certificate: Test Certificate
     async processPdfWithSigningAndEncryption(pdfBuffer: Buffer, config: SigningConfig): Promise<Buffer> {
         try {
             console.log(`🔒 Starting complete PDF processing (sign + encrypt)...`);
+            console.log(`🔍 DEBUG: Input PDF size: ${pdfBuffer.length}`);
+            console.log(`🔍 DEBUG: Config:`, config);
 
             let processedPdf = pdfBuffer;
 
@@ -318,12 +320,22 @@ Certificate: Test Certificate
             if (config.signedBy || config.signedOn || config.signedTm) {
                 console.log(`📝 Step 1: Signing PDF...`);
                 processedPdf = await this.signPdf(processedPdf, config);
+                console.log(`🔍 DEBUG: After signing, PDF size: ${processedPdf.length}`);
             }
 
             // Step 2: Encrypt the PDF if password is provided
             if (config.pdfPassword && config.pdfPassword.trim() !== '') {
                 console.log(`🔐 Step 2: Encrypting PDF with password...`);
+                console.log(`🔍 DEBUG: Password for encryption: "${config.pdfPassword}"`);
+                console.log(`🔍 DEBUG: Password length: ${config.pdfPassword.length}`);
+                console.log(`🔍 DEBUG: PDF size before encryption: ${processedPdf.length}`);
+
                 processedPdf = await this.encryptPdfWithPassword(processedPdf, config.pdfPassword);
+
+                console.log(`🔍 DEBUG: PDF size after encryption: ${processedPdf.length}`);
+                console.log(`🔍 DEBUG: Size changed: ${processedPdf.length !== pdfBuffer.length}`);
+            } else {
+                console.log(`🔍 DEBUG: No password provided, skipping encryption`);
             }
 
             console.log(`✅ PDF processing complete (signed: ${!!(config.signedBy || config.signedOn || config.signedTm)}, encrypted: ${!!(config.pdfPassword && config.pdfPassword.trim() !== '')})`);
