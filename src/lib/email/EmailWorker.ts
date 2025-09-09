@@ -22,6 +22,8 @@ interface ServiceStatus {
     startedBy?: string;
     lastActivity?: string;
     totalRunTime?: number;
+    currentSchedule?: string;
+    currentInterval?: string;
     emailStats?: {
         totalProcessed: number;
         totalSent: number;

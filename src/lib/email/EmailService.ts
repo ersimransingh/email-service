@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { PDFDocument } from 'pdf-lib';
 import sql from 'mssql';
 import { DatabaseManager } from '../database';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface SMTPConfig {
     SMTPServer: string;
@@ -199,8 +201,6 @@ export class EmailService {
                 `${'='.repeat(80)}\n\n`;
 
             // Create logs directory if it doesn't exist
-            const fs = require('fs');
-            const path = require('path');
             const logDir = path.dirname(logPath);
             if (!fs.existsSync(logDir)) {
                 fs.mkdirSync(logDir, { recursive: true });
@@ -476,6 +476,7 @@ export class EmailService {
      */
     async updateEmailStatus(emailId: number, status: string, messageId?: string, error?: string): Promise<void> {
         try {
+            console.log(`🔄 updateEmailStatus called with:`, { emailId, status, messageId, error });
             const pool = await this.dbManager.getConnection();
 
             // Build query based on status with proper defaults for non-nullable columns
@@ -505,13 +506,18 @@ export class EmailService {
 
             query += ' WHERE dd_srno = @emailId';
 
-            await request.query(query);
+            console.log(`🔄 Executing update query: ${query}`);
+            console.log(`🔄 Parameters:`, { emailId, status, processedDate: status === 'Y' ? new Date() : 'N/A', bounceReason: status === 'Y' ? '' : error });
+
+            const result = await request.query(query);
+            console.log(`🔄 Update query result:`, result);
 
             console.log(`📝 Updated email ${emailId} status to: ${status}`);
 
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             console.error('❌ Error updating email status:', errorMessage);
+            console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
         }
     }
 
@@ -533,27 +539,50 @@ export class EmailService {
 
             for (const emailRecord of pendingEmails) {
                 stats.processed++;
+                console.log(`\n🔍 Processing email record:`, {
+                    dd_srno: emailRecord.dd_srno,
+                    dd_toEmailid: emailRecord.dd_toEmailid,
+                    dd_subject: emailRecord.dd_subject,
+                    dd_SendFlag: emailRecord.dd_SendFlag
+                });
 
                 try {
+                    console.log(`📧 Calling sendEmailWithAttachment for email ${emailRecord.dd_srno}...`);
                     const result = await this.sendEmailWithAttachment(emailRecord);
+                    console.log(`📧 sendEmailWithAttachment result:`, result);
 
                     if (result.success) {
                         stats.success++;
+                        console.log(`✅ Email ${emailRecord.dd_srno} sent successfully, updating status...`);
                         if (emailRecord.dd_srno) {
+                            console.log(`🔄 Calling updateEmailStatus for email ${emailRecord.dd_srno} with status 'Y'...`);
                             await this.updateEmailStatus(emailRecord.dd_srno, 'Y', result.messageId);
+                            console.log(`✅ updateEmailStatus completed for email ${emailRecord.dd_srno}`);
+                        } else {
+                            console.log(`⚠️ No dd_srno found for email record, skipping status update`);
                         }
                     } else {
                         stats.failed++;
+                        console.log(`❌ Email ${emailRecord.dd_srno} failed, updating status...`);
                         if (emailRecord.dd_srno) {
+                            console.log(`🔄 Calling updateEmailStatus for email ${emailRecord.dd_srno} with status 'N'...`);
                             await this.updateEmailStatus(emailRecord.dd_srno, 'N', undefined, result.error);
+                            console.log(`✅ updateEmailStatus completed for email ${emailRecord.dd_srno}`);
+                        } else {
+                            console.log(`⚠️ No dd_srno found for email record, skipping status update`);
                         }
                     }
 
                 } catch (error: unknown) {
                     stats.failed++;
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                    console.log(`❌ Exception in email processing for ${emailRecord.dd_srno}:`, errorMessage);
                     if (emailRecord.dd_srno) {
+                        console.log(`🔄 Calling updateEmailStatus for email ${emailRecord.dd_srno} with status 'N' due to exception...`);
                         await this.updateEmailStatus(emailRecord.dd_srno, 'N', undefined, errorMessage);
+                        console.log(`✅ updateEmailStatus completed for email ${emailRecord.dd_srno}`);
+                    } else {
+                        console.log(`⚠️ No dd_srno found for email record, skipping status update`);
                     }
                 }
 
