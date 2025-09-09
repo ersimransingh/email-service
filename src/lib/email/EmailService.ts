@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { PDFDocument } from 'pdf-lib';
 import sql from 'mssql';
 import { DatabaseManager } from '../database';
+import { PdfSigningService } from '../signing/PdfSigningService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,6 +31,9 @@ interface EmailRecord {
     dd_SendFlag?: string;
     dd_EmailParamCode?: string;
     dd_RetryCount?: number;
+    dd_signedby?: string;
+    dd_signedon?: string;
+    dd_signedtm?: string;
     [key: string]: unknown;
 }
 
@@ -45,9 +49,11 @@ export class EmailService {
     private static instance: EmailService;
     private globalTransporter: nodemailer.Transporter | null = null;
     private dbManager: DatabaseManager;
+    private pdfSigningService: PdfSigningService;
 
     private constructor() {
         this.dbManager = DatabaseManager.getInstance();
+        this.pdfSigningService = PdfSigningService.getInstance();
     }
 
     public static getInstance(): EmailService {
@@ -235,26 +241,42 @@ export class EmailService {
     }
 
     /**
-     * Encrypt PDF with password using pdf-lib
+     * Process PDF with signing and encryption
      */
-    async encryptPdfWithPassword(pdfBuffer: Buffer, password: string): Promise<Buffer> {
+    async processPdfWithSigningAndEncryption(pdfBuffer: Buffer, emailRecord: EmailRecord): Promise<Buffer> {
         try {
-            // Load PDF to validate it
-            await PDFDocument.load(pdfBuffer);
+            console.log(`🔒 Starting PDF processing (sign + encrypt)...`);
 
-            // Note: pdf-lib doesn't support password encryption directly
-            // This is a simplified approach - in production you might need a different library
-            // For now, we'll return the original PDF and log that encryption was requested
-            console.log(`🔒 PDF encryption requested with password (length: ${password.length})`);
-            console.log('⚠️ Note: PDF encryption not implemented - returning original PDF');
+            // Check if signing is available
+            if (!this.pdfSigningService.isSigningAvailable()) {
+                console.log('⚠️ PDF signing not available, returning original PDF');
+                return pdfBuffer;
+            }
 
-            return pdfBuffer;
+            // Extract signing and encryption information from email record
+            const processingConfig = {
+                signedBy: emailRecord.dd_signedby || 'Unknown',
+                signedOn: emailRecord.dd_signedon || new Date().toISOString().split('T')[0],
+                signedTm: emailRecord.dd_signedtm || new Date().toTimeString().split(' ')[0],
+                pdfPassword: emailRecord.dd_Encpassword || ''
+            };
+
+            console.log(`📝 Processing PDF with:`, processingConfig);
+
+            // Process the PDF (sign + encrypt)
+            const processedPdfBuffer = await this.pdfSigningService.processPdfWithSigningAndEncryption(pdfBuffer, processingConfig);
+
+            console.log(`✅ PDF processed successfully (signed + encrypted)`);
+            return processedPdfBuffer;
+
         } catch (error: unknown) {
-            console.error('❌ Error encrypting PDF:', error);
-            // Return original PDF if encryption fails
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error('❌ Error processing PDF:', errorMessage);
+            // Return original PDF if processing fails
             return pdfBuffer;
         }
     }
+
 
     /**
      * Send email with PDF attachment
@@ -282,19 +304,23 @@ export class EmailService {
             if (emailRecord.dd_document && emailRecord.dd_filename) {
                 let pdfContent: Buffer | null = null;
 
-                // Check if we already have a final document (encrypted version)
+                // Check if we already have a final document (signed/encrypted version)
                 if (emailRecord.dd_Finaldocument) {
                     console.log(`📎 Using existing final document for "${emailRecord.dd_filename}"`);
                     pdfContent = emailRecord.dd_Finaldocument;
                 } else {
-                    // Use original document and encrypt if needed
+                    // Start with original document
                     pdfContent = emailRecord.dd_document;
 
-                    if (emailRecord.dd_Encpassword && emailRecord.dd_Encpassword.trim() !== '') {
-                        console.log(`🔒 Encrypting PDF "${emailRecord.dd_filename}" with password`);
-                        pdfContent = await this.encryptPdfWithPassword(emailRecord.dd_document, emailRecord.dd_Encpassword);
+                    // Check if PDF needs processing (signing or encryption)
+                    const needsSigning = emailRecord.dd_signedby || emailRecord.dd_signedon || emailRecord.dd_signedtm;
+                    const needsEncryption = emailRecord.dd_Encpassword && emailRecord.dd_Encpassword.trim() !== '';
 
-                        // Store the encrypted PDF as final document
+                    if (needsSigning || needsEncryption) {
+                        console.log(`🔒 Processing PDF "${emailRecord.dd_filename}" (signing: ${needsSigning}, encryption: ${needsEncryption})`);
+                        pdfContent = await this.processPdfWithSigningAndEncryption(pdfContent, emailRecord);
+
+                        // Store the final processed document (signed and/or encrypted)
                         if (emailRecord.dd_srno) {
                             try {
                                 await this.storeFinalDocument(emailRecord.dd_srno, pdfContent);
@@ -304,7 +330,7 @@ export class EmailService {
                             }
                         }
                     } else {
-                        console.log(`📎 Attaching PDF "${emailRecord.dd_filename}" without encryption`);
+                        console.log(`📎 Attaching PDF "${emailRecord.dd_filename}" without signing or encryption`);
                     }
                 }
 
