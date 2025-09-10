@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test-cert": "node test-certificate-connection.js",
+    "test-pin": "node test-pin-validation.js"
   },
   "dependencies": {
     "@types/crypto-js": "^4.2.2",
