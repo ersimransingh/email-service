@@ -1,11 +1,9 @@
 # PDF Signing Certificate Checker for Windows
 # This script checks for available PDF signing certificates on your Windows machine
-# Compatible with your email service PDF signing requirements
 
 param(
     [string]$CertificatePath = "",
     [string]$KeyPath = "",
-    [string]$Password = "",
     [switch]$Detailed = $false,
     [switch]$ExportResults = $false
 )
@@ -13,7 +11,7 @@ param(
 # Set console encoding for proper display
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-Write-Host "🔍 PDF Signing Certificate Checker" -ForegroundColor Cyan
+Write-Host "PDF Signing Certificate Checker" -ForegroundColor Cyan
 Write-Host "=================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -76,7 +74,7 @@ function Test-CertificateFile {
 
 # Function to check Windows Certificate Store
 function Test-WindowsCertificateStore {
-    Write-Host "`n🔐 Checking Windows Certificate Store..." -ForegroundColor Yellow
+    Write-Host "`nChecking Windows Certificate Store..." -ForegroundColor Yellow
     
     try {
         # Check Personal certificate store
@@ -88,7 +86,7 @@ function Test-WindowsCertificateStore {
             foreach ($cert in $personalCerts) {
                 $isValid = $cert.NotAfter -gt (Get-Date)
                 $status = if ($isValid) { "SUCCESS" } else { "WARNING" }
-                $message = if ($isValid) { "Valid certificate found" } else { "Expired certificate found"
+                $message = if ($isValid) { "Valid certificate found" } else { "Expired certificate found" }
                 
                 Add-Result $status $message "Subject: $($cert.Subject), Valid Until: $($cert.NotAfter.ToString('yyyy-MM-dd')), Thumbprint: $($cert.Thumbprint)"
             }
@@ -111,7 +109,7 @@ function Test-WindowsCertificateStore {
 
 # Function to check for common certificate locations
 function Test-CommonCertificateLocations {
-    Write-Host "`n📁 Checking common certificate locations..." -ForegroundColor Yellow
+    Write-Host "`nChecking common certificate locations..." -ForegroundColor Yellow
     
     $commonPaths = @(
         "$env:USERPROFILE\Documents\Certificates",
@@ -144,7 +142,7 @@ function Test-CommonCertificateLocations {
 
 # Function to test certificate loading with OpenSSL (if available)
 function Test-CertificateWithOpenSSL {
-    Write-Host "`n🔧 Testing certificate with OpenSSL (if available)..." -ForegroundColor Yellow
+    Write-Host "`nTesting certificate with OpenSSL (if available)..." -ForegroundColor Yellow
     
     # Check if OpenSSL is available
     try {
@@ -175,7 +173,7 @@ function Test-CertificateWithOpenSSL {
 
 # Function to check Node.js and required packages
 function Test-NodeEnvironment {
-    Write-Host "`n📦 Checking Node.js environment..." -ForegroundColor Yellow
+    Write-Host "`nChecking Node.js environment..." -ForegroundColor Yellow
     
     try {
         $nodeVersion = & node --version 2>$null
@@ -211,7 +209,7 @@ function Test-NodeEnvironment {
 
 # Function to generate recommendations
 function Get-Recommendations {
-    Write-Host "`n💡 Recommendations:" -ForegroundColor Green
+    Write-Host "`nRecommendations:" -ForegroundColor Green
     
     $hasCertificates = $results | Where-Object { $_.Status -eq "SUCCESS" -and $_.Message -like "*certificate*" }
     $hasPrivateKeys = $results | Where-Object { $_.Message -like "*private key*" }
@@ -238,12 +236,12 @@ Write-Host ""
 
 # Check provided certificate files
 if ($CertificatePath) {
-    Write-Host "🔍 Checking provided certificate file..." -ForegroundColor Yellow
+    Write-Host "Checking provided certificate file..." -ForegroundColor Yellow
     Test-CertificateFile -FilePath $CertificatePath -FileType "Certificate"
 }
 
 if ($KeyPath) {
-    Write-Host "🔍 Checking provided key file..." -ForegroundColor Yellow
+    Write-Host "Checking provided key file..." -ForegroundColor Yellow
     Test-CertificateFile -FilePath $KeyPath -FileType "Private Key"
 }
 
@@ -264,21 +262,21 @@ if ($ExportResults) {
 }
 
 # Summary
-Write-Host "`n📊 Summary:" -ForegroundColor Cyan
+Write-Host "`nSummary:" -ForegroundColor Cyan
 $successCount = ($results | Where-Object { $_.Status -eq "SUCCESS" }).Count
 $warningCount = ($results | Where-Object { $_.Status -eq "WARNING" }).Count
 $errorCount = ($results | Where-Object { $_.Status -eq "ERROR" }).Count
 
-Write-Host "✅ Success: $successCount" -ForegroundColor Green
-Write-Host "⚠️  Warnings: $warningCount" -ForegroundColor Yellow
-Write-Host "❌ Errors: $errorCount" -ForegroundColor Red
+Write-Host "Success: $successCount" -ForegroundColor Green
+Write-Host "Warnings: $warningCount" -ForegroundColor Yellow
+Write-Host "Errors: $errorCount" -ForegroundColor Red
 
 if ($errorCount -eq 0 -and $warningCount -eq 0) {
-    Write-Host "`n🎉 All checks passed! Your system is ready for PDF signing." -ForegroundColor Green
+    Write-Host "`nAll checks passed! Your system is ready for PDF signing." -ForegroundColor Green
 } elseif ($errorCount -eq 0) {
-    Write-Host "`n✅ System is mostly ready, but check the warnings above." -ForegroundColor Yellow
+    Write-Host "`nSystem is mostly ready, but check the warnings above." -ForegroundColor Yellow
 } else {
-    Write-Host "`n❌ Some issues found. Please address the errors before proceeding." -ForegroundColor Red
+    Write-Host "`nSome issues found. Please address the errors before proceeding." -ForegroundColor Red
 }
 
 Write-Host "`nScript completed at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
