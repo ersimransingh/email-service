@@ -1,7 +1,9 @@
 import { PDFDocument, PDFPage, rgb } from 'pdf-lib';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as forge from 'node-forge';
 import * as pdfPassword from 'pdf-password';
+import NativePdfSigner from './NativePdfSigner';
 
 interface SigningConfig {
     signedBy: string;
@@ -10,6 +12,15 @@ interface SigningConfig {
     certificatePath?: string;
     certificatePassword?: string;
     pdfPassword?: string;
+    // eSignature configuration
+    eSignature?: {
+        enabled: boolean;
+        certificate: {
+            serialNumber: string;   // USB certificate serial number
+            pinCode?: string;       // PIN for USB token
+            type: 'usb';            // Certificate type
+        };
+    };
 }
 
 interface CertificateInfo {
@@ -27,6 +38,7 @@ export class PdfSigningService {
         privateKey: forge.pki.PrivateKey;
         publicKey: forge.pki.PublicKey;
     } | null = null;
+    private nativeSigner: NativePdfSigner | null = null;
 
     private constructor() {
         // Don't initialize any certificates by default
@@ -41,7 +53,7 @@ export class PdfSigningService {
     }
 
     /**
-     * Load real certificate from file system
+     * Load real certificate from file system or configure C# signing
      * This method should be called when real certificates are available
      */
     async loadRealCertificate(certPath: string, keyPath: string, password?: string): Promise<boolean> {
@@ -62,12 +74,93 @@ export class PdfSigningService {
     }
 
     /**
+     * Configure eSignature with native USB certificate signing
+     */
+    async configureESignature(config: {
+        certificate: {
+            serialNumber: string;   // USB certificate serial number
+            pinCode?: string;       // PIN for USB token
+            type: 'usb';            // Certificate type
+        };
+    }): Promise<boolean> {
+        try {
+            console.log('🔒 Configuring eSignature with native USB certificate signing...');
+            console.log('📋 Certificate Serial:', config.certificate.serialNumber);
+            console.log('📋 Type:', config.certificate.type);
+
+            // Initialize native PDF signer
+            this.nativeSigner = new NativePdfSigner();
+
+            // Test if signing is available
+            const testResult = await this.nativeSigner.testSigning();
+            if (!testResult.available) {
+                console.error('❌ Native signing not available:', testResult.error);
+                return false;
+            }
+
+            // Verify the specific certificate exists
+            const certificate = await this.nativeSigner.findCertificateBySerial(config.certificate.serialNumber);
+            if (!certificate) {
+                console.error('❌ Certificate not found:', config.certificate.serialNumber);
+                return false;
+            }
+
+            console.log('✅ eSignature configured successfully with native USB certificate signing');
+            return true;
+        } catch (error) {
+            console.error('❌ Error configuring eSignature:', error);
+            return false;
+        }
+    }
+
+    /**
      * Sign a PDF with the provided configuration
      */
     async signPdf(pdfBuffer: Buffer, config: SigningConfig): Promise<Buffer> {
         try {
             console.log(`🔒 Starting PDF signing process...`);
 
+            // Check if eSignature is enabled and configured
+            if (config.eSignature?.enabled && this.nativeSigner) {
+                console.log('🔒 Using eSignature with native USB certificate signing...');
+
+                // Create temporary output file
+                const tempDir = process.cwd() + '/temp';
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+
+                const tempOutputPath = path.join(tempDir, `signed_${Date.now()}.pdf`);
+
+                try {
+                    // Sign PDF using native implementation
+                    const result = await this.nativeSigner.signPdf(pdfBuffer, tempOutputPath, {
+                        certificateSerial: config.eSignature.certificate.serialNumber,
+                        pinCode: config.eSignature.certificate.pinCode,
+                        pdfPassword: config.pdfPassword,
+                        signVisible: true
+                    });
+
+                    if (result.success && result.outputPath) {
+                        // Read the signed PDF
+                        const signedPdfBuffer = fs.readFileSync(result.outputPath);
+
+                        // Clean up temporary file
+                        fs.unlinkSync(result.outputPath);
+
+                        console.log('✅ PDF signed successfully with native eSignature');
+                        return signedPdfBuffer;
+                    } else {
+                        console.error('❌ eSignature failed:', result.error);
+                        throw new Error(`eSignature failed: ${result.error}`);
+                    }
+                } catch (signingError) {
+                    console.error('❌ Error during eSignature:', signingError);
+                    throw signingError;
+                }
+            }
+
+            // Fallback to original certificate-based signing
             if (!this.realCertificate) {
                 console.log('⚠️ No real certificate available - skipping PDF signing');
                 console.log('⚠️ PDF will be processed without digital signature');
@@ -269,10 +362,60 @@ export class PdfSigningService {
     }
 
     /**
-     * Check if signing is available (only with real certificates)
+     * Check if signing is available (real certificates or eSignature)
      */
     isSigningAvailable(): boolean {
-        return this.realCertificate !== null;
+        return this.realCertificate !== null || this.nativeSigner !== null;
+    }
+
+    /**
+     * Check if eSignature is available
+     */
+    isESignatureAvailable(): boolean {
+        return this.nativeSigner !== null;
+    }
+
+    /**
+     * Get eSignature configuration info
+     */
+    async getESignatureInfo(): Promise<{ available: boolean; info?: { type: string; serialNumber: string; hasPinCode: boolean }; error?: string }> {
+        if (!this.nativeSigner) {
+            return { available: false, error: 'eSignature not configured' };
+        }
+
+        try {
+            const testResult = await this.nativeSigner.testSigning();
+            return {
+                available: testResult.available,
+                info: testResult.available ? {
+                    type: 'usb',
+                    serialNumber: 'configured',
+                    hasPinCode: true
+                } : undefined,
+                error: testResult.error
+            };
+        } catch (error) {
+            return {
+                available: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            };
+        }
+    }
+
+    /**
+     * Get available certificates
+     */
+    async getAvailableCertificates(): Promise<{ serialNumber: string; subject: string; issuer: string; validFrom: Date; validTo: Date; thumbprint: string; hasPrivateKey: boolean }[]> {
+        if (!this.nativeSigner) {
+            return [];
+        }
+
+        try {
+            return await this.nativeSigner.getAvailableCertificates();
+        } catch (error) {
+            console.error('❌ Error getting certificates:', error);
+            return [];
+        }
     }
 }
 

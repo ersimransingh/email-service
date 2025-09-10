@@ -1,0 +1,10 @@
+{
+    "eSignature": {
+        "enabled": true,
+        "certificate": {
+            "serialNumber": "489EEE98E426DACC",
+            "pinCode": "1234",
+            "type": "usb"
+        }
+    }
+}

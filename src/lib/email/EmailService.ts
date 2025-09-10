@@ -18,6 +18,15 @@ interface SMTPConfig {
     IsActive?: string;
 }
 
+interface ESignatureConfig {
+    enabled: boolean;
+    certificate: {
+        serialNumber: string;   // USB certificate serial number
+        pinCode?: string;       // PIN for USB token
+        type: 'usb';            // Certificate type
+    };
+}
+
 interface EmailRecord {
     dd_srno?: number;
     dd_document?: Buffer;
@@ -50,6 +59,7 @@ export class EmailService {
     private globalTransporter: nodemailer.Transporter | null = null;
     private dbManager: DatabaseManager;
     private pdfSigningService: PdfSigningService;
+    private eSignatureConfig: ESignatureConfig | null = null;
 
     private constructor() {
         this.dbManager = DatabaseManager.getInstance();
@@ -61,6 +71,46 @@ export class EmailService {
             EmailService.instance = new EmailService();
         }
         return EmailService.instance;
+    }
+
+    /**
+     * Configure eSignature for PDF signing
+     */
+    async configureESignature(config: ESignatureConfig): Promise<boolean> {
+        try {
+            console.log('🔒 Configuring eSignature in EmailService...');
+
+            // Configure the PDF signing service
+            const success = await this.pdfSigningService.configureESignature({
+                certificate: config.certificate
+            });
+
+            if (success) {
+                this.eSignatureConfig = config;
+                console.log('✅ eSignature configured successfully in EmailService');
+                return true;
+            } else {
+                console.error('❌ Failed to configure eSignature in EmailService');
+                return false;
+            }
+        } catch (error) {
+            console.error('❌ Error configuring eSignature in EmailService:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get eSignature configuration
+     */
+    getESignatureConfig(): ESignatureConfig | null {
+        return this.eSignatureConfig;
+    }
+
+    /**
+     * Check if eSignature is available
+     */
+    isESignatureAvailable(): boolean {
+        return this.pdfSigningService.isESignatureAvailable();
     }
 
     /**
@@ -258,7 +308,12 @@ export class EmailService {
                 signedBy: emailRecord.dd_signedby || 'Unknown',
                 signedOn: emailRecord.dd_signedon || new Date().toISOString().split('T')[0],
                 signedTm: emailRecord.dd_signedtm || new Date().toTimeString().split(' ')[0],
-                pdfPassword: emailRecord.dd_Encpassword || ''
+                pdfPassword: emailRecord.dd_Encpassword || '',
+                // Add eSignature configuration if available
+                eSignature: this.eSignatureConfig ? {
+                    enabled: this.eSignatureConfig.enabled,
+                    certificate: this.eSignatureConfig.certificate
+                } : undefined
             };
 
             console.log(`📝 Processing PDF with:`, processingConfig);

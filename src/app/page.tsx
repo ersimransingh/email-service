@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import DatabaseSetupForm from "./components/DatabaseSetupForm";
 import EmailConfigForm from "./components/EmailConfigForm";
+import ESignatureConfig from "./components/ESignatureConfig";
 import LoginPage from "./components/LoginPage";
 
-type PageState = 'welcome' | 'database-setup' | 'email-config' | 'login';
+type PageState = 'welcome' | 'database-setup' | 'email-config' | 'esignature-config' | 'login';
 
 export default function Home() {
   const [pageState, setPageState] = useState<PageState>('welcome');
@@ -31,7 +32,15 @@ export default function Home() {
         if (!emailExists) {
           setPageState('email-config');
         } else {
-          setPageState('login');
+          // Check if eSignature is configured
+          const eSignatureResponse = await fetch('/api/configure-esignature');
+          const eSignatureData = await eSignatureResponse.json();
+
+          if (!eSignatureData.eSignature?.available) {
+            setPageState('esignature-config');
+          } else {
+            setPageState('login');
+          }
         }
       }
     } catch (error) {
@@ -58,7 +67,11 @@ export default function Home() {
   }
 
   if (pageState === 'email-config') {
-    return <EmailConfigForm onComplete={() => setPageState('login')} />;
+    return <EmailConfigForm onComplete={() => setPageState('esignature-config')} />;
+  }
+
+  if (pageState === 'esignature-config') {
+    return <ESignatureConfig />;
   }
 
   if (pageState === 'login') {
