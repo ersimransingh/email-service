@@ -146,10 +146,15 @@ startxref
         console.log('Target Certificate:', this.targetSerial);
 
         const signScript = `
-            # Load required assemblies
-            Add-Type -AssemblyName System.Security
-            Add-Type -AssemblyName System.Security.Cryptography
-            Add-Type -AssemblyName System.Drawing
+            # Load required assemblies with error handling
+            try {
+                Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+                Add-Type -AssemblyName System.Security.Cryptography -ErrorAction SilentlyContinue
+                Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+                Write-Host "✅ .NET assemblies loaded successfully"
+            } catch {
+                Write-Host "⚠️ Some .NET assemblies could not be loaded, but continuing..."
+            }
             
             # Try to load iTextSharp from common locations
             $iTextSharpPaths = @(

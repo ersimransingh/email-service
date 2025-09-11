@@ -15,7 +15,8 @@
     "test-apis": "node test-apis-directly.js",
     "test-usb": "node test-esignature-on-usb-computer.js",
     "test-fix": "node test-pdf-signing-fix.js",
-    "test-real-sign": "node test-real-pdf-signing.js"
+    "test-real-sign": "node test-real-pdf-signing.js",
+    "test-cert-access": "node test-certificate-access-only.js"
   },
   "dependencies": {
     "@types/crypto-js": "^4.2.2",
