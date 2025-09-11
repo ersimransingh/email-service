@@ -29,7 +29,7 @@ class UIESignatureTester {
 
             // Test configuration API
             console.log('🔧 Testing configuration API...');
-            const configResponse = await fetch('http://localhost:3000/api/configure-esignature', {
+            const configResponse = await fetch('http://localhost:3001/api/configure-esignature', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -53,7 +53,7 @@ class UIESignatureTester {
 
             // Test eSignature info API
             console.log('🧪 Testing eSignature info API...');
-            const infoResponse = await fetch('http://localhost:3000/api/configure-esignature', {
+            const infoResponse = await fetch('http://localhost:3001/api/configure-esignature', {
                 method: 'GET'
             });
 
@@ -73,7 +73,7 @@ class UIESignatureTester {
 
             // Test eSignature test API
             console.log('🧪 Testing eSignature test API...');
-            const testResponse = await fetch('http://localhost:3000/api/test-esignature', {
+            const testResponse = await fetch('http://localhost:3001/api/test-esignature', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -120,7 +120,7 @@ class UIESignatureTester {
                 }
             };
 
-            const response = await fetch('http://localhost:3000/api/configure-esignature', {
+            const response = await fetch('http://localhost:3001/api/configure-esignature', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(correctData)
@@ -148,7 +148,7 @@ class UIESignatureTester {
                 }
             };
 
-            const response = await fetch('http://localhost:3000/api/configure-esignature', {
+            const response = await fetch('http://localhost:3001/api/configure-esignature', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(wrongData)

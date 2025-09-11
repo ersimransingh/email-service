@@ -93,12 +93,28 @@ export class NativePdfSigner {
 
             const result = await this.executePowerShell(psScript);
 
+            console.log('🔍 PowerShell execution result:');
+            console.log('  Success:', result.success);
+            console.log('  Exit Code:', result.exitCode);
+            console.log('  STDOUT length:', result.stdout ? result.stdout.length : 0);
+            console.log('  STDERR length:', result.stderr ? result.stderr.length : 0);
+            
+            if (result.stdout) {
+                console.log('  STDOUT content:', result.stdout);
+            }
+            if (result.stderr) {
+                console.log('  STDERR content:', result.stderr);
+            }
+
             if (result.success && result.stdout) {
                 const lines = result.stdout.trim().split('\n').filter(line => line.trim());
+                console.log('🔍 Found', lines.length, 'certificate lines');
 
                 for (const line of lines) {
                     try {
+                        console.log('🔍 Parsing line:', line);
                         const certData = JSON.parse(line);
+                        console.log('🔍 Parsed certificate data:', certData);
                         certificates.push({
                             serialNumber: certData.SerialNumber,
                             subject: certData.Subject,
@@ -112,6 +128,7 @@ export class NativePdfSigner {
                         });
                     } catch (parseError) {
                         console.warn('⚠️ Error parsing certificate data:', parseError);
+                        console.warn('⚠️ Problematic line:', line);
                     }
                 }
             } else {
@@ -378,51 +395,66 @@ export class NativePdfSigner {
     /**
      * Execute PowerShell script
      */
-    private async executePowerShell(script: string): Promise<{ success: boolean; stdout: string; stderr: string }> {
+    private async executePowerShell(script: string): Promise<{ success: boolean; stdout: string; stderr: string; exitCode?: number }> {
         return new Promise((resolve) => {
-            const process = spawn('powershell', ['-Command', script], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                shell: true
+            console.log('🔧 Executing PowerShell script...');
+            console.log('🔧 Script length:', script.length);
+            
+            const process = spawn('powershell', [
+                '-ExecutionPolicy', 'Bypass',
+                '-Command', script
+            ], {
+                stdio: ['pipe', 'pipe', 'pipe']
             });
 
             let stdout = '';
             let stderr = '';
 
             process.stdout.on('data', (data) => {
-                stdout += data.toString();
+                const chunk = data.toString();
+                stdout += chunk;
+                console.log('🔧 STDOUT chunk:', chunk);
             });
 
             process.stderr.on('data', (data) => {
-                stderr += data.toString();
+                const chunk = data.toString();
+                stderr += chunk;
+                console.log('🔧 STDERR chunk:', chunk);
             });
 
             process.on('close', (code) => {
+                console.log('🔧 PowerShell process closed with code:', code);
                 resolve({
                     success: code === 0,
                     stdout: stdout.trim(),
-                    stderr: stderr.trim()
+                    stderr: stderr.trim(),
+                    exitCode: code
                 });
             });
 
             process.on('error', (error) => {
+                console.log('🔧 PowerShell process error:', error.message);
                 resolve({
                     success: false,
                     stdout: '',
-                    stderr: error.message
+                    stderr: error.message,
+                    exitCode: -1
                 });
             });
 
             // Set timeout
             setTimeout(() => {
                 if (!process.killed) {
+                    console.log('🔧 PowerShell process timeout, killing...');
                     process.kill();
                     resolve({
                         success: false,
                         stdout: '',
-                        stderr: 'Process timeout'
+                        stderr: 'Process timeout',
+                        exitCode: -2
                     });
                 }
-            }, 60000); // 60 seconds timeout
+            }, 30000); // 30 seconds timeout
         });
     }
 

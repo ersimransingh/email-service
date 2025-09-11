@@ -4,7 +4,7 @@ class DirectAPITester {
     constructor() {
         this.serialNumber = '489EEE98E426DACC';
         this.pinCode = '123456@'; // Your actual PIN
-        this.baseUrl = 'http://localhost:3000';
+        this.baseUrl = 'http://localhost:3001'; // Updated to port 3001
     }
 
     async testAPI(endpoint, method = 'GET', data = null) {
