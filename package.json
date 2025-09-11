@@ -13,7 +13,8 @@
     "test-ui": "node test-ui-esignature.js",
     "test-detection": "node test-certificate-detection.js",
     "test-apis": "node test-apis-directly.js",
-    "test-usb": "node test-esignature-on-usb-computer.js"
+    "test-usb": "node test-esignature-on-usb-computer.js",
+    "test-fix": "node test-pdf-signing-fix.js"
   },
   "dependencies": {
     "@types/crypto-js": "^4.2.2",

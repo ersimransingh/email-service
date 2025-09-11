@@ -39,6 +39,7 @@ export class PdfSigningService {
         publicKey: forge.pki.PublicKey;
     } | null = null;
     private nativeSigner: NativePdfSigner | null = null;
+    private eSignatureConfig: { certificate: { serialNumber: string; pinCode?: string; type: 'usb' } } | null = null;
 
     private constructor() {
         // Don't initialize any certificates by default
@@ -105,6 +106,9 @@ export class PdfSigningService {
                 return false;
             }
 
+            // Save the configuration
+            this.eSignatureConfig = config;
+
             console.log('✅ eSignature configured successfully with native USB certificate signing');
             return true;
         } catch (error) {
@@ -121,11 +125,11 @@ export class PdfSigningService {
             console.log(`🔒 Starting PDF signing process...`);
 
             // Check if eSignature is enabled and configured
-            if (config.eSignature?.enabled && this.nativeSigner) {
+            if (config.eSignature?.enabled && this.nativeSigner && this.eSignatureConfig) {
                 console.log('🔒 Using eSignature with native USB certificate signing...');
 
                 // Create temporary output file
-                const tempDir = process.cwd() + '/temp';
+                const tempDir = path.join(process.cwd(), 'temp');
                 if (!fs.existsSync(tempDir)) {
                     fs.mkdirSync(tempDir, { recursive: true });
                 }
@@ -135,8 +139,8 @@ export class PdfSigningService {
                 try {
                     // Sign PDF using native implementation
                     const result = await this.nativeSigner.signPdf(pdfBuffer, tempOutputPath, {
-                        certificateSerial: config.eSignature.certificate.serialNumber,
-                        pinCode: config.eSignature.certificate.pinCode,
+                        certificateSerial: this.eSignatureConfig.certificate.serialNumber,
+                        pinCode: this.eSignatureConfig.certificate.pinCode,
                         pdfPassword: config.pdfPassword,
                         signVisible: true
                     });
@@ -277,8 +281,14 @@ export class PdfSigningService {
             console.log(`🔐 Password length: ${password ? password.length : 0}`);
 
             // Create a temporary file for the input PDF
-            const tempInputPath = `/tmp/input_${Date.now()}.pdf`;
-            const tempOutputPath = `/tmp/output_${Date.now()}.pdf`;
+            // Create temp directory if it doesn't exist
+            const tempDir = path.join(process.cwd(), 'temp');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            const tempInputPath = path.join(tempDir, `input_${Date.now()}.pdf`);
+            const tempOutputPath = path.join(tempDir, `output_${Date.now()}.pdf`);
 
             try {
                 // Write the PDF buffer to a temporary file
@@ -372,14 +382,14 @@ export class PdfSigningService {
      * Check if eSignature is available
      */
     isESignatureAvailable(): boolean {
-        return this.nativeSigner !== null;
+        return !!(this.nativeSigner && this.eSignatureConfig);
     }
 
     /**
      * Get eSignature configuration info
      */
     async getESignatureInfo(): Promise<{ available: boolean; info?: { type: string; serialNumber: string; hasPinCode: boolean }; error?: string }> {
-        if (!this.nativeSigner) {
+        if (!this.nativeSigner || !this.eSignatureConfig) {
             return { available: false, error: 'eSignature not configured' };
         }
 
