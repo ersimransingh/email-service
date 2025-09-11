@@ -10,7 +10,8 @@
     "test-cert": "node test-certificate-connection.js",
     "test-pin": "node test-pin-validation.js",
     "test-esignature": "node test-esignature-config.js",
-    "test-ui": "node test-ui-esignature.js"
+    "test-ui": "node test-ui-esignature.js",
+    "test-detection": "node test-certificate-detection.js"
   },
   "dependencies": {
     "@types/crypto-js": "^4.2.2",

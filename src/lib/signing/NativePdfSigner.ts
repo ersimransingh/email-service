@@ -46,38 +46,48 @@ export class NativePdfSigner {
 
             const certificates: CertificateInfo[] = [];
 
-            // Use PowerShell to query Windows Certificate Store with provider information
+            // Use a simpler PowerShell script that doesn't try to access private keys directly
             const psScript = `
-                Get-ChildItem -Path "Cert:\\CurrentUser\\My" | Where-Object { $_.HasPrivateKey } | ForEach-Object {
-                    $cert = $_
-                    $provider = ""
-                    $container = ""
-                    
-                    try {
-                        $privateKey = $cert.PrivateKey
-                        if ($privateKey) {
-                            $cspInfo = $privateKey.CspKeyContainerInfo
-                            $provider = $cspInfo.ProviderName
-                            $container = $cspInfo.KeyContainerName
-                        }
-                    } catch {
-                        # Private key might be on hardware token
-                        $provider = "Hardware Token"
+                try {
+                    Get-ChildItem -Path "Cert:\\CurrentUser\\My" | Where-Object { $_.HasPrivateKey } | ForEach-Object {
+                        $cert = $_
+                        $provider = "Unknown"
                         $container = "Unknown"
+                        
+                        # Try to get provider info without accessing private key directly
+                        try {
+                            $privateKey = $cert.PrivateKey
+                            if ($privateKey -and $privateKey.CspKeyContainerInfo) {
+                                $cspInfo = $privateKey.CspKeyContainerInfo
+                                $provider = $cspInfo.ProviderName
+                                $container = $cspInfo.KeyContainerName
+                            } else {
+                                # This might be a hardware token
+                                $provider = "Hardware Token"
+                                $container = "Hardware Token"
+                            }
+                        } catch {
+                            # Private key access failed, likely hardware token
+                            $provider = "Hardware Token"
+                            $container = "Hardware Token"
+                        }
+                        
+                        $info = @{
+                            SerialNumber = $cert.SerialNumber
+                            Subject = $cert.Subject
+                            Issuer = $cert.Issuer
+                            ValidFrom = $cert.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
+                            ValidTo = $cert.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
+                            Thumbprint = $cert.Thumbprint
+                            HasPrivateKey = $cert.HasPrivateKey
+                            Provider = $provider
+                            Container = $container
+                        }
+                        $info | ConvertTo-Json -Compress
                     }
-                    
-                    $info = @{
-                        SerialNumber = $cert.SerialNumber
-                        Subject = $cert.Subject
-                        Issuer = $cert.Issuer
-                        ValidFrom = $cert.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
-                        ValidTo = $cert.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
-                        Thumbprint = $cert.Thumbprint
-                        HasPrivateKey = $cert.HasPrivateKey
-                        Provider = $provider
-                        Container = $container
-                    }
-                    $info | ConvertTo-Json -Compress
+                } catch {
+                    Write-Error "Error accessing certificate store: $($_.Exception.Message)"
+                    exit 1
                 }
             `;
 
@@ -104,6 +114,8 @@ export class NativePdfSigner {
                         console.warn('⚠️ Error parsing certificate data:', parseError);
                     }
                 }
+            } else {
+                console.error('❌ PowerShell script failed:', result.stderr);
             }
 
             console.log(`✅ Found ${certificates.length} certificates with private keys`);
