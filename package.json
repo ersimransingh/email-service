@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test-cert": "node test-certificate-connection.js",
-    "test-pin": "node test-pin-validation.js"
+    "test-pin": "node test-pin-validation.js",
+    "test-esignature": "node test-esignature-config.js"
   },
   "dependencies": {
     "@types/crypto-js": "^4.2.2",
@@ -25,7 +26,8 @@
     "pdf-lib": "^1.17.1",
     "pdf-password": "^1.0.0",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
