@@ -4,10 +4,13 @@ import PdfSigningService from '@/lib/signing/PdfSigningService';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
+        console.log('🧪 eSignature Test Request:', JSON.stringify(body, null, 2));
+
         const { certificate, testPdfPath } = body;
 
         // Validate required fields
         if (!certificate) {
+            console.error('❌ Missing certificate field in test request');
             return NextResponse.json(
                 { success: false, error: 'Missing required field: certificate' },
                 { status: 400 }
@@ -18,8 +21,12 @@ export async function POST(request: NextRequest) {
         const pdfSigningService = PdfSigningService.getInstance();
 
         // Test native signing availability
+        console.log('🧪 Testing eSignature availability...');
         const appTest = await pdfSigningService.getESignatureInfo();
+        console.log('🧪 eSignature availability test result:', appTest);
+
         if (!appTest.available) {
+            console.error('❌ Native signing not available:', appTest.error);
             return NextResponse.json({
                 success: false,
                 error: 'Native signing not available',

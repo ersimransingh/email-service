@@ -4,10 +4,13 @@ import PdfSigningService from '@/lib/signing/PdfSigningService';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
+        console.log('🔧 eSignature Configuration Request:', JSON.stringify(body, null, 2));
+
         const { certificate } = body;
 
         // Validate required fields
         if (!certificate) {
+            console.error('❌ Missing certificate field');
             return NextResponse.json(
                 { success: false, error: 'Missing required field: certificate' },
                 { status: 400 }
@@ -15,11 +18,21 @@ export async function POST(request: NextRequest) {
         }
 
         if (!certificate.serialNumber || !certificate.type) {
+            console.error('❌ Missing required certificate fields:', {
+                serialNumber: certificate.serialNumber,
+                type: certificate.type
+            });
             return NextResponse.json(
                 { success: false, error: 'Certificate must have serialNumber and type fields' },
                 { status: 400 }
             );
         }
+
+        console.log('🔧 Configuring eSignature with certificate:', {
+            serialNumber: certificate.serialNumber,
+            type: certificate.type,
+            hasPinCode: !!certificate.pinCode
+        });
 
         // Configure eSignature
         const pdfSigningService = PdfSigningService.getInstance();
@@ -27,7 +40,10 @@ export async function POST(request: NextRequest) {
             certificate
         });
 
+        console.log('🔧 eSignature configuration result:', success);
+
         if (success) {
+            console.log('✅ eSignature configured successfully');
             return NextResponse.json({
                 success: true,
                 message: 'eSignature configured successfully',
@@ -40,6 +56,7 @@ export async function POST(request: NextRequest) {
                 }
             });
         } else {
+            console.error('❌ Failed to configure eSignature');
             return NextResponse.json(
                 { success: false, error: 'Failed to configure eSignature' },
                 { status: 500 }

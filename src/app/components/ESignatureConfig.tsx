@@ -59,12 +59,15 @@ export default function ESignatureConfig() {
         setMessage(null);
 
         try {
+            // Send only the certificate object, not the entire config
             const response = await fetch('/api/configure-esignature', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(config),
+                body: JSON.stringify({
+                    certificate: config.certificate
+                }),
             });
 
             const data = await response.json();
@@ -92,7 +95,9 @@ export default function ESignatureConfig() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(config),
+                body: JSON.stringify({
+                    certificate: config.certificate
+                }),
             });
 
             const data = await response.json();
